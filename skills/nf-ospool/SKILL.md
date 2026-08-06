@@ -1,6 +1,8 @@
 ---
 name: nf-ospool
 description: Use when setting up, launching, or debugging a Nextflow workflow on UW-Madison CHTC / OSPool with the nf-ospool executor plugin — jobs that fail in seconds, a run that hangs with condor_q empty while Nextflow still shows tasks SUBMITTED, "Input file not found" / staging errors, HasCHTCStaging matchmaking, outputs landing in the wrong place, running tasks in a container (container_image vs process.container), understanding why sharedFilesystem is false, or writing the executor/config block from scratch.
+license: MIT
+compatibility: Requires Nextflow 25.10+ with the nf-ospool executor plugin and access to UW-Madison CHTC / OSPool; examples assume HTCondor and the CHTC /staging filesystem.
 ---
 
 # nf-ospool (Nextflow on CHTC / OSPool)

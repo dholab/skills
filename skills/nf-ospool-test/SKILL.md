@@ -1,6 +1,8 @@
 ---
 name: nf-ospool-test
 description: Use when you want to verify a CHTC / OSPool Nextflow setup actually works BEFORE launching a long real run — a live smoke test that submits one tiny throwaway job through the nf-ospool executor and confirms it lands on a HasCHTCStaging node, resolves a symlinked /staging input, writes output back, and completes. Catches the instant-crash and multi-day ghost-job hang failure modes early. Companion to the nf-ospool skill.
+license: MIT
+compatibility: Requires Python 3, Nextflow 25.10+, Java, the nf-ospool executor plugin, and access to UW-Madison CHTC / OSPool with the CHTC /staging filesystem.
 ---
 
 # nf-ospool-test (live smoke test)

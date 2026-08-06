@@ -1,42 +1,72 @@
-# dholab-skills
-
-Shared **agent skills** for the O'Connor Lab (DHO).
+# Agent Skills for the David H. O'Connor (DHO) Lab
 
 Each skill is a self-contained reference guide — a `SKILL.md` with YAML frontmatter
 (`name`, `description`) in the portable [Agent Skills](https://agentskills.io/specification)
 format. An AI coding agent loads a skill on demand when its trigger conditions match,
 so lab-specific institutional knowledge doesn't have to be re-derived every time.
 
-The skill *content* here is not tied to any one agent — it's general CHTC / OSPool /
-Nextflow knowledge. The `SKILL.md` format is recognized by Claude Code and other
-compatible agents (Codex, Copilot CLI, Gemini CLI).
-
 ## Skills
 
-| Skill | Use it when |
-|---|---|
-| [`nf-ospool`](skills/nf-ospool/SKILL.md) | Setting up or debugging a Nextflow workflow on CHTC / OSPool with the `nf-ospool` executor plugin — instant-crash jobs, multi-day `condor_q`-empty hangs, `HasCHTCStaging` matchmaking, containers, and why `sharedFilesystem = false`. |
-| [`nf-ospool-test`](skills/nf-ospool-test/SKILL.md) | Verifying a CHTC / OSPool setup actually works *before* a long run — a live smoke test that submits one tiny probe job and confirms the staging path is healthy. Companion to `nf-ospool`. |
+| Skill                                              | Use it when                                                                                                                                                                                                                             |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`nf-ospool`](skills/nf-ospool/SKILL.md)           | Setting up or debugging a Nextflow workflow on CHTC / OSPool with the `nf-ospool` executor plugin — instant-crash jobs, multi-day `condor_q`-empty hangs, `HasCHTCStaging` matchmaking, containers, and why `sharedFilesystem = false`. |
+| [`nf-ospool-test`](skills/nf-ospool-test/SKILL.md) | Verifying a CHTC / OSPool setup actually works _before_ a long run — a live smoke test that submits one tiny probe job and confirms the staging path is healthy. Companion to `nf-ospool`.                                              |
 
 ## Installing
 
-Make the skills discoverable to your agent by linking or copying each skill
-directory into the folder that agent scans for skills:
+Use the [`skills`](https://github.com/vercel-labs/skills) installer and choose
+which skills and coding agents you want to configure. Installation is local to
+the current project by default; pass `--global` to install for your user account.
 
-- **Claude Code:** `~/.claude/skills/`
-- **Other agents (Codex, Copilot CLI, Gemini CLI):** `~/.agents/skills/` (cross-runtime alias)
+With npm:
 
 ```bash
-git clone git@github.com:dholab/dholab-skills.git
+npx skills@latest add dholab/skills
+```
+
+With pnpm:
+
+```bash
+pnpm dlx skills@latest add dholab/skills
+```
+
+With Bun:
+
+```bash
+bunx skills@latest add dholab/skills
+```
+
+To inspect the available skills without installing them:
+
+```bash
+npx skills@latest add dholab/skills --list
+```
+
+### Manual installation
+
+Clone the repository, then link or copy each desired skill directory into the
+folder your agent scans for skills:
+
+- **Claude Code:** `~/.claude/skills/`
+- **Codex:** `~/.codex/skills/`
+- **GitHub Copilot CLI:** `~/.copilot/skills/`
+- **Gemini CLI:** `~/.gemini/skills/`
+- **OpenCode:** `~/.config/opencode/skills/`
+
+```bash
+git clone https://github.com/dholab/skills.git dholab-skills
 cd dholab-skills
 
-# Symlink into your agent's skills dir (recommended — stays in sync with git pulls).
-# Swap ~/.claude/skills for ~/.agents/skills if you use a different agent:
+# Symlinks stay in sync when you pull repository updates. Set this path to the
+# directory for your agent from the list above.
 SKILLS_DIR=~/.claude/skills
 mkdir -p "$SKILLS_DIR"
 ln -s "$PWD/skills/nf-ospool"      "$SKILLS_DIR/nf-ospool"
 ln -s "$PWD/skills/nf-ospool-test" "$SKILLS_DIR/nf-ospool-test"
 ```
+
+To install independent copies instead, replace the two `ln -s` commands with
+`cp -R`.
 
 The agent then exposes them by name (in Claude Code, as `/nf-ospool` and
 `/nf-ospool-test`).
@@ -44,5 +74,5 @@ The agent then exposes them by name (in Claude Code, as `/nf-ospool` and
 ## Contributing
 
 Add a new skill as `skills/<name>/SKILL.md` with YAML frontmatter (`name`,
-`description`). Keep the `description` focused on *when* to use the skill (start
+`description`). Keep the `description` focused on _when_ to use the skill (start
 with "Use when…"). See the existing skills for the house style.
