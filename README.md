@@ -11,6 +11,7 @@ so lab-specific institutional knowledge doesn't have to be re-derived every time
 | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`chtc-oconnor-jobs`](skills/chtc-oconnor-jobs/SKILL.md) | Running OConnor-group HTCondor batch campaigns on CHTC — staging large data, transferring execute-node inputs, packaging runtimes, starting with a canary, bounding concurrency, and retaining only verified outputs.              |
 | [`dholk`](skills/dholk/SKILL.md)                   | Working with LabKey or the DHO Lab's DHOLK instance — exploring containers and schemas, writing queries or client scripts, and configuring MCP tools without committing API keys. The MCP tools are read-only, but generated scripts may not be. |
+| [`duckdb-dholk`](skills/duckdb-dholk/SKILL.md)     | Analyzing DHOLK tables locally with DuckDB through `duck-lk`. This thin bridge depends on the `dholk` skill in this repository and the upstream [`duck-lk`](https://github.com/nrminor/duck-lk) skill.                              |
 | [`nf-ospool`](skills/nf-ospool/SKILL.md)           | Setting up or debugging a Nextflow workflow on CHTC / OSPool with the `nf-ospool` executor plugin — instant-crash jobs, multi-day `condor_q`-empty hangs, `HasCHTCStaging` matchmaking, containers, and why `sharedFilesystem = false`. |
 | [`nf-ospool-test`](skills/nf-ospool-test/SKILL.md) | Verifying a CHTC / OSPool setup actually works _before_ a long run — a live smoke test that submits one tiny probe job and confirms the staging path is healthy. Companion to `nf-ospool`.                                              |
 
@@ -65,6 +66,7 @@ SKILLS_DIR=~/.claude/skills
 mkdir -p "$SKILLS_DIR"
 ln -s "$PWD/skills/chtc-oconnor-jobs" "$SKILLS_DIR/chtc-oconnor-jobs"
 ln -s "$PWD/skills/dholk"          "$SKILLS_DIR/dholk"
+ln -s "$PWD/skills/duckdb-dholk"   "$SKILLS_DIR/duckdb-dholk"
 ln -s "$PWD/skills/nf-ospool"      "$SKILLS_DIR/nf-ospool"
 ln -s "$PWD/skills/nf-ospool-test" "$SKILLS_DIR/nf-ospool-test"
 ```
@@ -72,7 +74,7 @@ ln -s "$PWD/skills/nf-ospool-test" "$SKILLS_DIR/nf-ospool-test"
 To install independent copies instead, replace each `ln -s` command with `cp -R`.
 
 The agent then exposes them by name (in Claude Code, as `/chtc-oconnor-jobs`,
-`/dholk`, `/nf-ospool`, and `/nf-ospool-test`).
+`/dholk`, `/duckdb-dholk`, `/nf-ospool`, and `/nf-ospool-test`).
 
 ## Contributing
 
