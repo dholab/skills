@@ -9,6 +9,7 @@ so lab-specific institutional knowledge doesn't have to be re-derived every time
 
 | Skill                                              | Use it when                                                                                                                                                                                                                             |
 | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`dholk`](skills/dholk/SKILL.md)                   | Working with LabKey or the DHO Lab's DHOLK instance — exploring containers and schemas, writing queries or client scripts, and configuring MCP tools without committing API keys. The MCP tools are read-only, but generated scripts may not be. |
 | [`nf-ospool`](skills/nf-ospool/SKILL.md)           | Setting up or debugging a Nextflow workflow on CHTC / OSPool with the `nf-ospool` executor plugin — instant-crash jobs, multi-day `condor_q`-empty hangs, `HasCHTCStaging` matchmaking, containers, and why `sharedFilesystem = false`. |
 | [`nf-ospool-test`](skills/nf-ospool-test/SKILL.md) | Verifying a CHTC / OSPool setup actually works _before_ a long run — a live smoke test that submits one tiny probe job and confirms the staging path is healthy. Companion to `nf-ospool`.                                              |
 
@@ -61,15 +62,15 @@ cd dholab-skills
 # directory for your agent from the list above.
 SKILLS_DIR=~/.claude/skills
 mkdir -p "$SKILLS_DIR"
+ln -s "$PWD/skills/dholk"          "$SKILLS_DIR/dholk"
 ln -s "$PWD/skills/nf-ospool"      "$SKILLS_DIR/nf-ospool"
 ln -s "$PWD/skills/nf-ospool-test" "$SKILLS_DIR/nf-ospool-test"
 ```
 
-To install independent copies instead, replace the two `ln -s` commands with
-`cp -R`.
+To install independent copies instead, replace each `ln -s` command with `cp -R`.
 
-The agent then exposes them by name (in Claude Code, as `/nf-ospool` and
-`/nf-ospool-test`).
+The agent then exposes them by name (in Claude Code, as `/dholk`, `/nf-ospool`,
+and `/nf-ospool-test`).
 
 ## Contributing
 
