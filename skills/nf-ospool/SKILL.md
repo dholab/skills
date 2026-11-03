@@ -1,6 +1,6 @@
 ---
 name: nf-ospool
-description: Use when setting up, launching, or debugging a Nextflow workflow on UW-Madison CHTC / OSPool with the nf-ospool executor plugin — jobs that fail in seconds, a run that hangs with condor_q empty while Nextflow still shows tasks SUBMITTED, "Input file not found" / staging errors, HasCHTCStaging matchmaking, outputs landing in the wrong place, running tasks in a container (container_image vs process.container), understanding why sharedFilesystem is false, or writing the executor/config block from scratch.
+description: Use when setting up, launching, or debugging a Nextflow workflow on UW-Madison CHTC / OSPool with the nf-ospool executor plugin — choosing a plugin version (0.1.0 vs 0.1.1+), jobs that fail in seconds, a run that hangs with condor_q empty while Nextflow still shows tasks SUBMITTED, "Input file not found" / staging errors, HasCHTCStaging matchmaking, outputs landing in the wrong place, running tasks in a container (container_image vs per-process container directives, nf-core-style pipelines), understanding why sharedFilesystem is false, or writing the executor/config block from scratch.
 license: MIT
 compatibility: Requires Nextflow 25.10+ with the nf-ospool executor plugin and access to UW-Madison CHTC / OSPool; examples assume HTCondor and the CHTC /staging filesystem.
 ---
@@ -12,6 +12,18 @@ compatibility: Requires Nextflow 25.10+ with the nf-ospool executor plugin and a
 `nf-ospool` is a Nextflow executor plugin that submits tasks to UW-Madison CHTC's OSPool via HTCondor. Its whole model rests on one assumption: **the CHTC `/staging` filesystem is a shared filesystem that both the access point (AP) and the execute nodes can read and write.** Almost every failure below is a violation of that assumption.
 
 **Core mental model:** Nextflow's work dir lives on `/staging`. The plugin runs in "restricted filesystem mode" — it **symlinks** `/staging` inputs into each task instead of transferring them, and the task's wrapper writes outputs, `.command.begin`, `.command.err`, and `.exitcode` **directly to the `/staging` work dir**. Nextflow decides a task is done by watching for its `.exitcode` file to appear there. If a task lands on a node where `/staging` isn't mounted, the symlinks dangle, the writes fail, `.exitcode` never appears, and Nextflow waits forever.
+
+## Choose the plugin version first
+
+Before writing config or giving container advice, ask the user which version they want, unless they already named one. If their `nextflow.config` pins a version, mention it when you ask. Recommend the newest version on the [registry](https://registry.nextflow.io/api/v1/plugins/nf-ospool), which is 0.1.1 as of this writing.
+
+| | `0.1.0` | `0.1.1` or newer |
+|---|---|---|
+| Per-process `container` directives (classic nf-core style) | Not supported: input bind mounts can use the canonical cephfs path | **Supported:** input bind mounts and symlinks use the `pathMappings` path |
+| Container path to use | A only (see [Containers](#containers)) | B for per-process containers; A still works |
+| Install | Nextflow plugin registry | Nextflow plugin registry |
+
+Compare versions numerically, so `0.1.10` counts as newer than `0.1.2`.
 
 ## The #1 gotcha (staging matchmaking)
 
@@ -34,6 +46,10 @@ Note the **explicit parentheses** around the OS check: in ClassAd, `&&` binds ti
 ## Known-good executor config block
 
 ```groovy
+plugins {
+    id 'nf-ospool@<version>'   // the version the user chose
+}
+
 process {
     executor = 'ospool'
 }
@@ -77,9 +93,15 @@ process FOO {
 
 ## Containers
 
-Two mutually exclusive ways to run each task in a container. Pick one.
+There are two mutually exclusive ways to run a task in a container. Choose by plugin version and by how the pipeline declares its images:
 
-**A. HTCondor-native — recommended on OSPool.** Pass the image as an HTCondor submit directive inside `clusterOptions`, and do **NOT** set `apptainer.enabled` or `process.container`. HTCondor/OSPool launches the whole task wrapper (`.command.run`, with its `/staging` symlink resolution) *inside* the image and auto-bind-mounts `/staging` for you.
+| Situation | Use |
+|---|---|
+| Plugin `0.1.1`+ and processes declare `container` (nf-core modules, for example) | **B** |
+| Plugin `0.1.1`+ and one image for the whole pipeline | A or B |
+| Plugin `0.1.0` | **A**, with a separate `container_image` in each process's `clusterOptions` if images differ |
+
+**A. HTCondor-native (any version).** Pass the image as an HTCondor submit directive inside `clusterOptions`, and do **not** set `singularity.enabled`, `apptainer.enabled`, or `process.container`. HTCondor launches the whole task wrapper (`.command.run`, with its `/staging` symlink resolution) *inside* the image and bind-mounts `/staging` for you.
 
 ```groovy
 clusterOptions '''
@@ -90,12 +112,43 @@ transfer_output_files = ""
 '''
 ```
 
-- nf-ospool does **not** emit `container_image` for you — you add it yourself.
-- A `docker://` URL is pulled by HTCondor; a `.sif` file must sit on a node-accessible path (`/staging`), never `/home`.
+- nf-ospool does **not** emit `container_image` for you; you add it yourself.
+- A `docker://` URL is pulled by HTCondor. A `.sif` file must sit on a node-accessible path (`/staging`), never `/home`.
 
-**B. Nextflow-native — for apptainer HPC (e.g. Slurm), not the usual OSPool path.** Set `apptainer.enabled = true` + `process.container = "docker://..."`. Nextflow wraps the command in `apptainer exec`, and nf-ospool's wrapper builder fixes the bind mounts: it normalizes symlinked input paths and adds `-B <stagedPath>:<originalPath>` for each auto-staged directory so paths resolve inside the container. **Requires Singularity/Apptainer** — Docker is rejected when `autoStageDirectories` is in use.
+**B. Nextflow-native per-process containers (`0.1.1`+).** Enable Singularity or Apptainer and let each process's `container` directive pick its image, as in a classic nf-core pipeline. Nextflow wraps each task in `singularity exec` (or `apptainer exec`), and nf-ospool adds the bind mounts.
 
-**Rule of thumb:** on OSPool use A; reserve B for apptainer-based HPC clusters.
+```groovy
+plugins {
+    id 'nf-ospool@0.1.1'
+}
+
+singularity {
+    enabled = true
+    autoMounts = true
+    cacheDir = "/staging/groups/<group>/singularity-cache"
+}
+
+process {
+    executor = 'ospool'
+    // Set here, not in the process: nf-core modules don't carry CHTC directives.
+    clusterOptions = '''
+    requirements = ((OpSysMajorVer == 8) || (OpSysMajorVer == 9)) && (Target.HasCHTCStaging == true)
+    +AccountingGroup = "YourLab_Group"
+    transfer_output_files = ""
+    '''
+}
+```
+
+Keep the `executor.$ospool` and `workDir` settings from the [config block above](#known-good-executor-config-block). Then check these points:
+
+- **`pathMappings` is required.** The 0.1.1 fix rewrites input paths through it, so a wrong key brings back cephfs bind mounts. Verify it with `readlink -f /staging`.
+- **Images are pulled on the AP.** Nextflow pulls them before submitting, so the runtime must be on the AP's `PATH` (`command -v singularity apptainer`). Pipelines with many images need a longer `singularity.pullTimeout` than the 20-minute default.
+- **`cacheDir` goes on `/staging`,** because compute nodes read the `.sif` from it. Never use `/home`.
+- **Omit `container_image`** so that only one layer runs the container.
+- **Use Singularity or Apptainer, not Docker.** Docker is rejected when `autoStageDirectories` is in use. To use Apptainer, replace the `singularity` scope with `apptainer`.
+- **For an nf-core pipeline,** enable the runtime with `-profile singularity` or `-profile apptainer` alongside your CHTC config, and leave out the `enabled` line.
+
+Confirm the setup with the `nf-ospool-test` skill's `--container` probe before a long run. It's the check that this path works on your AP and execute nodes.
 
 ## Why the config looks weird: `sharedFilesystem = false` on a shared filesystem
 
@@ -151,6 +204,7 @@ condor_q -af ClusterId JobStatus RemoteHost
 | Run hangs for days; `condor_q` empty but Nextflow shows tasks `SUBMITTED` | Jobs left the queue but `.exitcode` never got written to `/staging` (node couldn't write there), so Nextflow's poller never sees completion | Fix the staging `requirements` (above), kill the hung run, relaunch with `-resume` |
 | "Input file not found" on the node | `/staging` stage-in symlink points at the canonical cephfs path the node can't resolve | Set `pathMappings = ['<readlink -f /staging output>': '/staging']` |
 | `chmod: cannot access './binary'` / binary not executable | `autoStageDirectories` copies with a plain copy that drops the exec bit | `chmod +x ./binary` at the top of the script (or the file lives under `/home`, invisible to nodes — must be auto-staged) |
+| Containerized task can't find inputs; `.command.run` has `-B /mnt/htc-cephfs/...` | Plugin `0.1.0`, or a `pathMappings` key that doesn't match this AP | Move to `0.1.1`+ and set the key from `readlink -f /staging`, or use `container_image` on `0.1.0` |
 | Huge transfers into `/home`, home quota fills | Default HTCondor `ON_EXIT` output transfer copying `/staging` outputs back to the submit dir | Add `transfer_output_files = ""` (safe only with the staging `requirements` in place) |
 | Held jobs (`H`), HoldReason mentions disk/memory | `disk`/`memory` request too low for real input sizes | Raise `disk`/`memory`; note `/staging` inputs are symlinked so they don't count against scratch `disk`, but temp files + outputs do |
 | `outdir` path contains a literal `${...}` | Single-quoted string in the config — Groovy does not interpolate single quotes | Use double quotes: `outdir = "/staging/.../${params.experiment}/..."` |
@@ -158,7 +212,7 @@ condor_q -af ClusterId JobStatus RemoteHost
 
 ## First-run setup checklist
 
-1. Point Nextflow at the plugin release, e.g. `export NXF_PLUGINS_TEST_REPOSITORY="https://github.com/nrminor/nf-ospool/releases/download/<ver>/nf-ospool-<ver>-meta.json"` and add `plugins { id 'nf-ospool@<ver>' }`.
+1. Ask which plugin version the user wants, then add `plugins { id 'nf-ospool@<version>' }`; Nextflow downloads it from the plugin registry. Unset any old `NXF_PLUGINS_TEST_REPOSITORY`: that route needs a GitHub release asset, and 0.1.1 has none.
 2. Verify the `pathMappings` key: `readlink -f /staging` → use that as the key.
 3. `workDir` on `/staging`; `submitFileDir` on `/home`; launch from `/home`.
 4. `requirements` expression with `Target.HasCHTCStaging == true` (parenthesized) + `+AccountingGroup` + `transfer_output_files = ""`.
@@ -168,5 +222,5 @@ condor_q -af ClusterId JobStatus RemoteHost
 
 ## References
 
-- **Plugin source (public):** https://github.com/nrminor/nf-ospool — the design rationale lives in the source comments. Most useful files: `OspoolExecutor.groovy` (`isAccessibleFromComputeNodes`, staging-mode decision, config validation), `OspoolFileCopyStrategy.groovy` (symlink + path normalization), `OspoolWrapperBuilder.groovy` (container bind-mount building). The README lists the four OSPool constraints the plugin exists to solve.
+- **Plugin source (public):** https://github.com/nrminor/nf-ospool — the design rationale lives in the source comments. Most useful files: `OspoolExecutor.groovy` (`isAccessibleFromComputeNodes`, staging-mode decision, config validation), `OspoolFileCopyStrategy.groovy` (symlink + path normalization), `OspoolWrapperBuilder.groovy` (container bind-mount building). Commit `f5f34b1f` is the 0.1.1 container fix, and `examples/with-containers/` shows the per-process form. The README lists the four OSPool constraints the plugin exists to solve.
 - **Known-working config:** the `nvd` pipeline's `chtc_htc` profile (`~/.nvd/.../conf/chtc-template.config` or a generated `user.config`) is battle-tested on CHTC: `sharedFilesystem = false`, a real `requirements` expression, `transfer_output_files = ""`, `+AccountingGroup`, HTCondor-native `container_image`, and generous `disk`. Read it when in doubt about a directive.

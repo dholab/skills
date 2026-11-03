@@ -18,6 +18,9 @@ What it actually exercises (the exact chain that fails silently in production):
 
 If the task succeeds, all three worked -> the staging path is healthy.
 
+With --container (plugin >= 0.1.1), the probe also runs through a per-process
+`container` directive and must report that it ran inside the image.
+
 Outcomes:
   PASS  - task ran on a staging node, read the /staging probe, wrote output back.
   FAIL  - task errored fast (usually landed on a non-staging node: dangling
@@ -40,6 +43,10 @@ import tempfile
 import time
 from pathlib import Path
 
+# First release whose input bind mounts follow pathMappings, which per-process
+# `container` directives depend on.
+MIN_CONTAINER_VERSION = (0, 1, 1)
+
 
 # --------------------------------------------------------------------------- #
 # Config discovery
@@ -47,8 +54,9 @@ from pathlib import Path
 def detect_from_config(config_path: Path) -> dict:
     """Best-effort scrape of an existing nextflow.config for sane defaults.
 
-    We only pull the two values that vary per lab/AP: the AccountingGroup and the
-    /staging group directory (derived from the existing workDir). Everything else
+    We only pull the values that vary per lab/AP: the AccountingGroup, the /staging
+    group directory (derived from the existing workDir), and the pinned plugin
+    version. Everything else
     (requirements, pathMappings) is regenerated known-good so the smoke test is a
     clean reference, not a copy of a possibly-broken config.
     """
@@ -56,6 +64,10 @@ def detect_from_config(config_path: Path) -> dict:
     if not config_path.is_file():
         return found
     text = config_path.read_text()
+
+    m = re.search(r'nf-ospool@(\d+(?:\.\d+)*)', text)
+    if m:
+        found["plugin_version"] = m.group(1)
 
     m = re.search(r'\+AccountingGroup\s*=\s*"([^"]+)"', text)
     if m:
@@ -71,6 +83,13 @@ def detect_from_config(config_path: Path) -> dict:
             group_root = Path(*parts[: i + 2])  # /staging/groups/<group>
             found["staging_dir"] = str(group_root / "nf-ospool-smoke")
     return found
+
+
+def parse_version(version: str) -> tuple[int, ...] | None:
+    """Numeric version tuple, so 0.1.10 sorts after 0.1.2. None if malformed."""
+    if not re.fullmatch(r"\d+(\.\d+)*", version):
+        return None
+    return tuple(int(part) for part in version.split("."))
 
 
 def staging_canonical_prefix() -> str:
@@ -100,6 +119,7 @@ nextflow.enable.dsl = 2
 // (silently) when a task lands on a node without /staging.
 process SMOKE {
     executor 'ospool'
+    container params.container
     cpus   1
     memory '2 GB'
     disk   '1 GB'
@@ -128,6 +148,7 @@ process SMOKE {
       echo "node=\\$(hostname)"
       echo "probe_seen=\\$(cat ${probe})"
       echo "staging_write=ok"
+      echo "container=\\${APPTAINER_CONTAINER:-\\${SINGULARITY_CONTAINER:-none}}"
     } > smoke_result.txt
     """
 }
@@ -139,12 +160,29 @@ workflow {
 '''
 
 
-def config_nf(staging_dir: str, submit_dir: str, mapping_key: str) -> str:
+def config_nf(
+    staging_dir: str,
+    submit_dir: str,
+    mapping_key: str,
+    plugin_version: str,
+    container_engine: str | None = None,
+) -> str:
+    engine_block = ""
+    if container_engine:
+        engine_block = f'''
+{container_engine} {{
+    enabled = true
+    autoMounts = true
+    cacheDir = '{staging_dir}/container-cache'
+}}
+'''
     return f'''\
-plugins {{ id 'nf-ospool@0.1.0' }}
+plugins {{ id 'nf-ospool@{plugin_version}' }}
+
+params.container = null
 
 process {{ executor = 'ospool' }}
-
+{engine_block}
 executor {{
     $ospool {{
         submitFileDir = '{submit_dir}'
@@ -192,6 +230,10 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="nf-ospool live smoke test")
     ap.add_argument("--staging-dir", help="/staging base for the smoke work dir + probe")
     ap.add_argument("--accounting-group", help='HTCondor +AccountingGroup value')
+    ap.add_argument("--plugin-version", help="nf-ospool version to test, e.g. 0.1.1 (default: pin in ./nextflow.config)")
+    ap.add_argument("--container", help="run the probe in this image via a per-process container directive (plugin >= 0.1.1)")
+    ap.add_argument("--container-engine", choices=["singularity", "apptainer"], default="singularity",
+                    help="runtime for --container (default: singularity)")
     ap.add_argument("--nextflow", default="nextflow", help="nextflow command (default: nextflow)")
     ap.add_argument("--timeout", type=int, default=900, help="seconds before declaring HANG (default: 900)")
     ap.add_argument("--keep", action="store_true", help="keep temp dirs for inspection")
@@ -209,6 +251,23 @@ def main() -> int:
         print("                     --accounting-group <YourLab_Group>")
         return 2
 
+    plugin_version = args.plugin_version or detected.get("plugin_version")
+    if not plugin_version:
+        print("ERROR: could not determine the nf-ospool version to test.")
+        print("       Pass --plugin-version (e.g. 0.1.1), or run from a dir whose")
+        print("       nextflow.config pins nf-ospool@<version>.")
+        return 2
+
+    version = parse_version(plugin_version)
+    if version is None:
+        print(f"ERROR: invalid --plugin-version {plugin_version!r}; expected e.g. 0.1.1.")
+        return 2
+
+    if args.container and version < MIN_CONTAINER_VERSION:
+        print(f"ERROR: --container needs nf-ospool >= 0.1.1 (got {plugin_version}).")
+        print("       On older versions, use container_image in clusterOptions instead.")
+        return 2
+
     staging_dir = Path(staging_dir)
     mapping_key = staging_canonical_prefix()
 
@@ -218,6 +277,8 @@ def main() -> int:
     probe = staging_dir / "probe.txt"
 
     print("nf-ospool smoke test")
+    print(f"  plugin version   : {plugin_version}")
+    print(f"  container        : {args.container or 'none'}")
     print(f"  staging dir      : {staging_dir}")
     print(f"  accounting group : {accounting_group}")
     print(f"  /staging maps from: {mapping_key}")
@@ -230,7 +291,10 @@ def main() -> int:
         probe.write_text("staging-visible\n")
         (launch_dir / "main.nf").write_text(MAIN_NF)
         (launch_dir / "nextflow.config").write_text(
-            config_nf(str(staging_dir), submit_dir, mapping_key)
+            config_nf(
+                str(staging_dir), submit_dir, mapping_key, plugin_version,
+                args.container_engine if args.container else None,
+            )
         )
 
         cmd = [
@@ -241,6 +305,8 @@ def main() -> int:
             "--accounting_group", accounting_group,
             "--outdir", str(launch_dir / "out"),
         ]
+        if args.container:
+            cmd += ["--container", args.container]
         print(f"launching probe job (timeout {args.timeout}s)...")
         start = time.time()
         try:
@@ -256,13 +322,22 @@ def main() -> int:
         if proc.returncode == 0:
             result = launch_dir / "out" / "smoke_result.txt"
             node = "?"
+            ran_in = "none"
             if result.exists():
                 for line in result.read_text().splitlines():
                     if line.startswith("node="):
                         node = line.split("=", 1)[1]
+                    elif line.startswith("container="):
+                        ran_in = line.split("=", 1)[1]
             print()
+            if args.container and ran_in == "none":
+                print(f"  FAIL  probe ran on {node}, but NOT inside {args.container}.")
+                print("        -> check the container directive and runtime settings.")
+                return 1
             print(f"  PASS  probe ran on {node} in {elapsed}s")
             print("        staging symlink resolved + /staging write + .exitcode all OK")
+            if args.container:
+                print(f"        ran inside container: {ran_in}")
             print("        -> the nf-ospool staging path is healthy; safe to launch.")
             return 0
 
